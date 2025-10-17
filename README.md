@@ -49,13 +49,13 @@ The application is a Flask-based web server that listens for POST requests conta
     - Replace `your_secret_here` with your chosen secret.
     - Replace `your_github_token_here` with your GitHub Personal Access Token.
 
-### Running the Application
+### Running the Application Locally
 
-To start the application, run the following command from the root directory:
+To run the application locally, use `gunicorn`:
 ```bash
-python student_app/app.py
+gunicorn student_app.app:app
 ```
-The server will start on `http://127.0.0.1:5000`.
+The server will start on `http://127.0.0.1:8000`.
 
 ## Usage
 
@@ -80,6 +80,12 @@ curl -X POST http://127.0.0.1:5000/ \
 ```
 
 Replace `your_secret_here` with the secret you defined in your `.env` file. If successful, this will create a new repository on your GitHub account named `sum-of-sales-test` with a deployed GitHub Pages site.
+
+## Deployment
+
+The application is configured for deployment on platforms like Heroku or Render. Once deployed, the live application will be available at:
+
+[https://your-app-name.onrender.com](https://your-app-name.onrender.com)
 
 ## License
 
