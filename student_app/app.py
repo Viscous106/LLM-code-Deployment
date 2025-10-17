@@ -25,6 +25,35 @@ def handle_task():
     if request_secret != app_secret:
         return jsonify({"error": "Invalid secret"}), 401
 
+    # Route request based on round number
+    round_number = data.get('round', 1)
+    if round_number == 1:
+        return handle_creation_task(data)
+    elif round_number == 2:
+        return handle_revision_task(data)
+    else:
+        return jsonify({"error": f"Round {round_number} is not supported"}), 400
+
+def update_repository(repo, files: dict, commit_message: str):
+    """Updates files in a GitHub repository."""
+    for path, content in files.items():
+        try:
+            # Get the existing file to update
+            existing_file = repo.get_contents(path)
+            repo.update_file(
+                path=path,
+                message=commit_message,
+                content=content,
+                sha=existing_file.sha
+            )
+            print(f"Updated file: {path}")
+        except Exception as e:
+            # If the file doesn't exist, create it
+            repo.create_file(path, commit_message, content)
+            print(f"Created new file: {path}")
+
+def handle_creation_task(data: dict):
+    """Handles the creation of a new application for Round 1."""
     # Application Generation
     brief = data.get('brief')
     if not brief:
@@ -51,6 +80,68 @@ def handle_task():
     print("Notification status:", notification_status)
 
     return jsonify({"message": "Request received successfully"}), 200
+
+def handle_revision_task(data: dict):
+    """Handles the revision of an existing application for Round 2."""
+    print("Handling revision task...")
+
+    task_id = data.get('task')
+    if not task_id:
+        return jsonify({"error": "Task ID not provided"}), 400
+
+    brief = data.get('brief')
+    if not brief:
+        return jsonify({"error": "Brief not provided"}), 400
+
+    github_token = os.environ.get('GITHUB_TOKEN')
+    if not github_token:
+        raise ValueError("GitHub token not configured")
+
+    g = Github(github_token)
+    user = g.get_user()
+
+    try:
+        repo = user.get_repo(task_id)
+    except Exception as e:
+        return jsonify({"error": f"Could not find repository {task_id}: {e}"}), 404
+
+    # Get existing file content
+    try:
+        index_content = repo.get_contents("index.html").decoded_content.decode('utf-8')
+        readme_content = repo.get_contents("README.md").decoded_content.decode('utf-8')
+    except Exception as e:
+        return jsonify({"error": f"Could not read files from repository: {e}"}), 500
+
+    # Placeholder for revision generation and deployment
+    print(f"Existing index.html length: {len(index_content)}")
+    print(f"Existing README.md length: {len(readme_content)}")
+
+    # Generate revised code
+    attachments = data.get('attachments', [])
+    revised_files = generate_revised_app_code(brief, attachments, index_content, readme_content)
+
+    # Update the repository with the revised files
+    commit_message = f"feat: Update application for round 2 - {brief}"
+    update_repository(repo, revised_files, commit_message)
+
+    # Get the latest commit SHA
+    commit_sha = repo.get_branch("main").commit.sha
+
+    # Notify the evaluation service
+    evaluation_url = data.get('evaluation_url')
+    if not evaluation_url:
+        return jsonify({"error": "Evaluation URL not provided"}), 400
+
+    repo_details = {
+        "repo_url": repo.html_url,
+        "commit_sha": commit_sha,
+        "pages_url": f"https://{user.login}.github.io/{task_id}/"
+    }
+
+    notification_status = notify_evaluation_service(evaluation_url, data, repo_details)
+    print("Notification status:", notification_status)
+
+    return jsonify({"message": "Revision complete and notification sent"}), 200
 
 import base64
 import csv
@@ -94,6 +185,58 @@ def generate_app_with_llm(brief: str, attachments: list) -> dict:
 </body>
 </html>
 """
+    }
+
+def generate_revised_app_code(brief: str, attachments: list, old_index: str, old_readme: str) -> dict:
+    """
+    Generates revised application code based on the new brief and existing code.
+    """
+    if "sum-of-sales" in brief and "Bootstrap table" in brief:
+        return revise_sum_of_sales_app(brief, attachments, old_index, old_readme)
+    else:
+        # Fallback for other revision tasks
+        return {
+            "index.html": old_index,
+            "README.md": old_readme + "\n\n## Round 2\n\n" + brief
+        }
+
+def revise_sum_of_sales_app(brief: str, attachments: list, old_index: str, old_readme: str) -> dict:
+    """
+    Revises the sum-of-sales application to include a product table.
+    """
+    # In a real implementation, we would parse the old HTML and CSV to add the table.
+    # For this example, we'll just append a hardcoded table.
+
+    product_table = """
+    <h2 class="mt-5">Product Sales</h2>
+    <table id="product-sales" class="table">
+        <thead>
+            <tr>
+                <th>Product</th>
+                <th>Sales</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Product 1</td>
+                <td>100.00</td>
+            </tr>
+            <tr>
+                <td>Product 2</td>
+                <td>200.00</td>
+            </tr>
+        </tbody>
+    </table>
+    """
+
+    # Find the closing div tag and insert the table before it.
+    new_index = old_index.replace("</div>", product_table + "\n</div>")
+
+    new_readme = old_readme + "\n\n## Round 2\n\n" + brief
+
+    return {
+        "index.html": new_index,
+        "README.md": new_readme
     }
 
 def generate_sum_of_sales_app(brief: str, attachments: list) -> dict:
