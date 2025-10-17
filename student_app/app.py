@@ -17,8 +17,8 @@ app = Flask(__name__)
 
 # --- Request Handling ---
 
-@app.route('/', methods=['POST'])
-def handle_task():
+@app.route('/build', methods=['POST'])
+def handle_build():
     """
     Main endpoint to handle incoming task requests.
     Verifies the secret and routes the request based on the round number.

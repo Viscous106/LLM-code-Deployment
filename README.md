@@ -59,10 +59,10 @@ The server will start on `http://127.0.0.1:8000`.
 
 ## Usage
 
-You can test the application by sending a POST request to the `/` endpoint. Here is an example using `curl`:
+You can test the application by sending a POST request to the `/build` endpoint. Here is an example using `curl`:
 
 ```bash
-curl -X POST http://127.0.0.1:5000/ \
+curl -X POST http://127.0.0.1:8000/build \
 -H "Content-Type: application/json" \
 -d '{
     "email": "student@example.com",
@@ -85,7 +85,7 @@ Replace `your_secret_here` with the secret you defined in your `.env` file. If s
 
 The application is configured for deployment on platforms like Heroku or Render. Once deployed, the live application will be available at:
 
-[https://your-app-name.onrender.com](https://your-app-name.onrender.com)
+[https://llm-code-deployment-3cic.onrender.com](https://llm-code-deployment-3cic.onrender.com)
 
 ## License
 
