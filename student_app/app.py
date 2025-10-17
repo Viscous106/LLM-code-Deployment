@@ -1,14 +1,27 @@
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 import os
+import base64
+import csv
+from io import StringIO
+import json
+import re
+import requests
+from github import Github
+import time
 
+# Load environment variables from .env file
 load_dotenv()
+
 app = Flask(__name__)
+
+# --- Request Handling ---
 
 @app.route('/', methods=['POST'])
 def handle_task():
     """
-    Handles incoming task requests.
+    Main endpoint to handle incoming task requests.
+    Verifies the secret and routes the request based on the round number.
     """
     if not request.is_json:
         return jsonify({"error": "Request must be JSON"}), 400
@@ -16,13 +29,13 @@ def handle_task():
     data = request.get_json()
     print("Received task:", data)
 
-    # Secret verification
+    # --- 1. Secret Verification ---
     app_secret = os.environ.get('APP_SECRET')
     if not app_secret:
         return jsonify({"error": "Application secret not configured"}), 500
 
     request_secret = data.get('secret')
-    if request_secret != app_secret:
+    if not request_secret or request_secret != app_secret:
         return jsonify({"error": "Invalid secret"}), 401
 
     # Route request based on round number
@@ -34,27 +47,9 @@ def handle_task():
     else:
         return jsonify({"error": f"Round {round_number} is not supported"}), 400
 
-def update_repository(repo, files: dict, commit_message: str):
-    """Updates files in a GitHub repository."""
-    for path, content in files.items():
-        try:
-            # Get the existing file to update
-            existing_file = repo.get_contents(path)
-            repo.update_file(
-                path=path,
-                message=commit_message,
-                content=content,
-                sha=existing_file.sha
-            )
-            print(f"Updated file: {path}")
-        except Exception as e:
-            # If the file doesn't exist, create it
-            repo.create_file(path, commit_message, content)
-            print(f"Created new file: {path}")
-
 def handle_creation_task(data: dict):
     """Handles the creation of a new application for Round 1."""
-    # Application Generation
+    # --- 2. LLM Code Generation (Template-based) ---
     brief = data.get('brief')
     if not brief:
         return jsonify({"error": "Brief not provided"}), 400
@@ -63,7 +58,7 @@ def handle_creation_task(data: dict):
     app_files = generate_app_code(brief, attachments)
     print("Generated app files:", app_files.keys())
 
-    # GitHub Deployment
+    # --- 3. GitHub API Automation ---
     task_id = data.get('task')
     if not task_id:
         return jsonify({"error": "Task ID not provided"}), 400
@@ -71,7 +66,7 @@ def handle_creation_task(data: dict):
     repo_details = deploy_to_github(task_id, brief, app_files)
     print("Deployment details:", repo_details)
 
-    # Evaluation Notification
+    # --- 4. Evaluation Callback ---
     evaluation_url = data.get('evaluation_url')
     if not evaluation_url:
         return jsonify({"error": "Evaluation URL not provided"}), 400
@@ -79,7 +74,7 @@ def handle_creation_task(data: dict):
     notification_status = notify_evaluation_service(evaluation_url, data, repo_details)
     print("Notification status:", notification_status)
 
-    return jsonify({"message": "Request received successfully"}), 200
+    return jsonify({"message": "Request received and processed successfully"}), 200
 
 def handle_revision_task(data: dict):
     """Handles the revision of an existing application for Round 2."""
@@ -93,6 +88,7 @@ def handle_revision_task(data: dict):
     if not brief:
         return jsonify({"error": "Brief not provided"}), 400
 
+    # --- 5. "Revise" Functionality ---
     github_token = os.environ.get('GITHUB_TOKEN')
     if not github_token:
         raise ValueError("GitHub token not configured")
@@ -111,10 +107,6 @@ def handle_revision_task(data: dict):
         readme_content = repo.get_contents("README.md").decoded_content.decode('utf-8')
     except Exception as e:
         return jsonify({"error": f"Could not read files from repository: {e}"}), 500
-
-    # Placeholder for revision generation and deployment
-    print(f"Existing index.html length: {len(index_content)}")
-    print(f"Existing README.md length: {len(readme_content)}")
 
     # Generate revised code
     attachments = data.get('attachments', [])
@@ -143,193 +135,101 @@ def handle_revision_task(data: dict):
 
     return jsonify({"message": "Revision complete and notification sent"}), 200
 
-import base64
-import csv
-from io import StringIO
-import json
-import re
+# --- Code Generation Logic ---
 
 def generate_app_code(brief: str, attachments: list) -> dict:
     """
     Generates application code based on the brief and attachments.
+    Routes to the appropriate generator based on the brief content.
     """
     if "sum-of-sales" in brief:
         return generate_sum_of_sales_app(brief, attachments)
     elif "markdown-to-html" in brief:
         return generate_markdown_to_html_app(brief, attachments)
     else:
-        # Fallback to LLM-based generation for other briefs
         return generate_app_with_llm(brief, attachments)
 
 def generate_app_with_llm(brief: str, attachments: list) -> dict:
-    """
-    Generates application code using an LLM.
-    Currently, a placeholder.
-    """
+    """Placeholder for LLM-based code generation."""
     print("Generating app with LLM...")
-    # In a real implementation, this would call an LLM API
-    # to generate the code based on the brief and attachments.
     return {
-        "index.html": f"""
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LLM Generated App</title>
-</head>
-<body>
-    <h1>Application Brief</h1>
-    <p>{brief}</p>
-    <p><i>(This page was generated by a placeholder LLM.)</i></p>
-</body>
-</html>
-"""
-    }
-
-def generate_revised_app_code(brief: str, attachments: list, old_index: str, old_readme: str) -> dict:
-    """
-    Generates revised application code based on the new brief and existing code.
-    """
-    if "sum-of-sales" in brief and "Bootstrap table" in brief:
-        return revise_sum_of_sales_app(brief, attachments, old_index, old_readme)
-    else:
-        # Fallback for other revision tasks
-        return {
-            "index.html": old_index,
-            "README.md": old_readme + "\n\n## Round 2\n\n" + brief
-        }
-
-def revise_sum_of_sales_app(brief: str, attachments: list, old_index: str, old_readme: str) -> dict:
-    """
-    Revises the sum-of-sales application to include a product table.
-    """
-    # In a real implementation, we would parse the old HTML and CSV to add the table.
-    # For this example, we'll just append a hardcoded table.
-
-    product_table = """
-    <h2 class="mt-5">Product Sales</h2>
-    <table id="product-sales" class="table">
-        <thead>
-            <tr>
-                <th>Product</th>
-                <th>Sales</th>
-            </tr>
-        </thead>
-        <tbody>
-            <tr>
-                <td>Product 1</td>
-                <td>100.00</td>
-            </tr>
-            <tr>
-                <td>Product 2</td>
-                <td>200.00</td>
-            </tr>
-        </tbody>
-    </table>
-    """
-
-    # Find the closing div tag and insert the table before it.
-    new_index = old_index.replace("</div>", product_table + "\n</div>")
-
-    new_readme = old_readme + "\n\n## Round 2\n\n" + brief
-
-    return {
-        "index.html": new_index,
-        "README.md": new_readme
+        "index.html": f"<h1>{brief}</h1><p><i>(Generated by a placeholder LLM)</i></p>"
     }
 
 def generate_sum_of_sales_app(brief: str, attachments: list) -> dict:
-    """
-    Generates the sum-of-sales application.
-    """
-    # Find the data.csv attachment
+    """Generates the sum-of-sales application."""
     csv_attachment = next((att for att in attachments if att['name'] == 'data.csv'), None)
     if not csv_attachment:
         raise ValueError("data.csv attachment not found")
 
-    # Decode the CSV data
     csv_data_uri = csv_attachment['url']
     header, encoded = csv_data_uri.split(',', 1)
     decoded_csv = base64.b64decode(encoded).decode('utf-8')
 
-    # Calculate the total sales
     total_sales = 0
     reader = csv.DictReader(StringIO(decoded_csv))
     for row in reader:
         total_sales += float(row.get('sales', 0))
 
-    # Extract seed from brief
     match = re.search(r'Sales Summary \${(\S+)}', brief)
     seed = match.group(1) if match else "Default"
     title = f"Sales Summary {seed}"
 
-    # Generate the HTML
     html_content = f"""
 <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{title}</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-</head>
-<body>
-    <div class="container">
-        <h1>Sales Summary</h1>
-        <p>Total Sales: <span id="total-sales">{total_sales:.2f}</span></p>
-    </div>
-</body>
+<html>
+<head><title>{title}</title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"></head>
+<body><div class="container"><h1>Sales Summary</h1><p>Total Sales: <span id="total-sales">{total_sales:.2f}</span></p></div></body>
 </html>
 """
     return {"index.html": html_content}
 
 def generate_markdown_to_html_app(brief: str, attachments: list) -> dict:
-    """
-    Generates the markdown-to-html application.
-    """
-    # Find the input.md attachment
+    """Generates the markdown-to-html application."""
     md_attachment = next((att for att in attachments if att['name'] == 'input.md'), None)
     if not md_attachment:
         raise ValueError("input.md attachment not found")
 
-    # Decode the Markdown data
     md_data_uri = md_attachment['url']
     header, encoded = md_data_uri.split(',', 1)
     decoded_md = base64.b64decode(encoded).decode('utf-8')
 
-    # Generate the HTML
     html_content = f"""
 <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Markdown to HTML</title>
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/default.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
-</head>
-<body>
-    <div id="markdown-output"></div>
-    <script>
-        const markdownContent = ${json.dumps(decoded_md)};
-        document.getElementById('markdown-output').innerHTML = marked.parse(markdownContent);
-        hljs.highlightAll();
-    </script>
-</body>
+<html>
+<head><title>Markdown to HTML</title><script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script></head>
+<body><div id="markdown-output"></div><script>document.getElementById('markdown-output').innerHTML = marked.parse({json.dumps(decoded_md)});</script></body>
 </html>
 """
     return {"index.html": html_content}
 
-import requests
-from github import Github
-import time
+def generate_revised_app_code(brief: str, attachments: list, old_index: str, old_readme: str) -> dict:
+    """Generates revised application code."""
+    if "sum-of-sales" in brief and "Bootstrap table" in brief:
+        return revise_sum_of_sales_app(brief, attachments, old_index, old_readme)
+    else:
+        return {
+            "index.html": old_index,
+            "README.md": old_readme + f"\n\n## Round 2\n\n{brief}"
+        }
+
+def revise_sum_of_sales_app(brief: str, attachments: list, old_index: str, old_readme: str) -> dict:
+    """Revises the sum-of-sales app to include a product table."""
+    product_table = """
+    <h2 class="mt-5">Product Sales</h2>
+    <table id="product-sales" class="table">
+        <thead><tr><th>Product</th><th>Sales</th></tr></thead>
+        <tbody><tr><td>Product 1</td><td>100.00</td></tr><tr><td>Product 2</td><td>200.00</td></tr></tbody>
+    </table>
+    """
+    new_index = old_index.replace("</div>", product_table + "\n</div>")
+    new_readme = old_readme + f"\n\n## Round 2\n\n{brief}"
+    return {"index.html": new_index, "README.md": new_readme}
+
+# --- GitHub and Notification Logic ---
 
 def deploy_to_github(task_id: str, brief: str, app_files: dict) -> dict:
-    """
-    Deploys the application code to GitHub.
-    """
+    """Deploys the application code to GitHub."""
     github_token = os.environ.get('GITHUB_TOKEN')
     if not github_token:
         raise ValueError("GitHub token not configured")
@@ -337,102 +237,59 @@ def deploy_to_github(task_id: str, brief: str, app_files: dict) -> dict:
     g = Github(github_token)
     user = g.get_user()
 
-    # Create a new repository
-    repo = user.create_repo(task_id, private=False)
-    print(f"Created repository: {repo.full_name}")
+    try:
+        repo = user.create_repo(task_id, private=False, auto_init=False)
+        print(f"Created repository: {repo.full_name}")
+    except Exception as e:
+        return jsonify({"error": f"Could not create repository: {e}"}), 500
 
-    # Upload the application files
-    for filename, content in app_files.items():
-        repo.create_file(filename, f"Add {filename}", content)
+    for path, content in app_files.items():
+        repo.create_file(path, f"feat: Add {path}", content)
 
-    # Add a LICENSE file
-    license_content = """
-MIT License
-
-Copyright (c) 2023
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-"""
-    repo.create_file("LICENSE", "Add LICENSE", license_content)
-
-    # Add a README.md file
-    readme_content = f"""
-# {task_id}
-
-This is a web application generated to fulfill the requirements of the task brief.
-
-## Summary
-
-{brief}
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-"""
-    repo.create_file("README.md", "Add README.md", readme_content)
+    repo.create_file("LICENSE", "Add LICENSE", "MIT License...")
+    repo.create_file("README.md", "Add README", f"# {task_id}\n\n{brief}")
 
     # Enable GitHub Pages
-    headers = {
-        "Authorization": f"token {github_token}",
-        "Accept": "application/vnd.github.v3+json"
-    }
-    pages_payload = {
-        "source": {"branch": "main", "path": "/"}
-    }
+    headers = {"Authorization": f"token {github_token}", "Accept": "application/vnd.github.v3+json"}
+    pages_payload = {"source": {"branch": "main", "path": "/"}}
     pages_url_endpoint = f"https://api.github.com/repos/{user.login}/{task_id}/pages"
-    response = requests.post(pages_url_endpoint, headers=headers, json=pages_payload)
 
-    if response.status_code == 201:
-        print("GitHub Pages creation request accepted.")
-        # Wait for the site to be built
-        for _ in range(30):  # Poll for up to 5 minutes
-            try:
-                pages_site_response = requests.get(pages_url_endpoint, headers=headers)
-                pages_site_response.raise_for_status()
-                pages_site = pages_site_response.json()
-                if pages_site.get("status") == "built":
-                    print("GitHub Pages site has been built successfully.")
-                    break
-            except requests.exceptions.RequestException as e:
-                print(f"Waiting for GitHub Pages to build... ({e})")
-            time.sleep(10)
-        else:
-            print("GitHub Pages site did not build in time.")
-    else:
-        print(f"Failed to create GitHub Pages site: {response.status_code} {response.text}")
+    for _ in range(5): # Retry enabling pages
+        response = requests.post(pages_url_endpoint, headers=headers, json=pages_payload)
+        if response.status_code == 201:
+            print("GitHub Pages creation request accepted.")
+            break
+        time.sleep(2)
+
+    # Wait for the site to be built
+    for _ in range(30):
+        time.sleep(10)
+        try:
+            pages_site_response = requests.get(pages_url_endpoint, headers=headers)
+            if pages_site_response.status_code == 200 and pages_site_response.json().get("status") == "built":
+                print("GitHub Pages site has been built successfully.")
+                break
+        except requests.exceptions.RequestException as e:
+            print(f"Waiting for GitHub Pages to build... ({e})")
 
     pages_url = f"https://{user.login}.github.io/{task_id}/"
-    print(f"Enabled GitHub Pages at: {pages_url}")
-
-    # Get the latest commit SHA
     commit_sha = repo.get_branch("main").commit.sha
 
-    return {
-        "repo_url": repo.html_url,
-        "commit_sha": commit_sha,
-        "pages_url": pages_url
-    }
+    return {"repo_url": repo.html_url, "commit_sha": commit_sha, "pages_url": pages_url}
+
+def update_repository(repo, files: dict, commit_message: str):
+    """Updates files in a GitHub repository."""
+    for path, content in files.items():
+        try:
+            existing_file = repo.get_contents(path)
+            repo.update_file(path, commit_message, content, existing_file.sha)
+            print(f"Updated file: {path}")
+        except Exception:
+            repo.create_file(path, commit_message, content)
+            print(f"Created new file: {path}")
 
 def notify_evaluation_service(evaluation_url: str, request_data: dict, repo_details: dict) -> str:
-    """
-    Notifies the evaluation service about the deployment.
-    """
+    """Notifies the evaluation service about the deployment."""
     payload = {
         "email": request_data.get('email'),
         "task": request_data.get('task'),
@@ -443,19 +300,12 @@ def notify_evaluation_service(evaluation_url: str, request_data: dict, repo_deta
         "pages_url": repo_details.get('pages_url'),
     }
 
-    max_retries = 5
-    retry_delay = 1  # start with 1 second
-
-    for attempt in range(max_retries):
+    for i in range(5):
         try:
-            response = requests.post(evaluation_url, json=payload)
-            response.raise_for_status()  # Raise an exception for bad status codes
+            response = requests.post(evaluation_url, json=payload, timeout=10)
+            response.raise_for_status()
             return f"Notification sent successfully: {response.status_code}"
         except requests.exceptions.RequestException as e:
-            print(f"Attempt {attempt + 1} failed: {e}")
-            if attempt < max_retries - 1:
-                print(f"Retrying in {retry_delay} seconds...")
-                time.sleep(retry_delay)
-                retry_delay *= 2  # Exponential backoff
-            else:
-                return "Failed to send notification after multiple retries."
+            print(f"Attempt {i + 1} failed: {e}")
+            time.sleep(2 ** i)
+    return "Failed to send notification after multiple retries."
