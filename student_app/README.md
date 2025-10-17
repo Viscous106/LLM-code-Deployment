@@ -13,8 +13,9 @@ This application receives a task, generates a web application, deploys it to Git
     Create a `.env` file in this directory with the following content:
     ```
     APP_SECRET=your_secret_here
+    GITHUB_TOKEN=your_github_token_here
     ```
-    Replace `your_secret_here` with the actual secret provided.
+    Replace `your_secret_here` with the actual secret provided and `your_github_token_here` with your GitHub Personal Access Token.
 
 ## Running the Application
 
